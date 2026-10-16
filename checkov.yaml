@@ -8,8 +8,22 @@ framework:
 skip-path:
   - examples/
 
-# Uncomment to suppress known false positives for this module.
 # Reference: https://www.checkov.io/5.Policy%20Index/terraform.html
 #
-# skip-check:
-#   - CKV_TF_1   # Allow tag-based module source pinning instead of commit hash
+# The following are exposed as caller-controlled toggles (default off) rather than
+# forced on, because there is no single correct default across every consumer/engine:
+skip-check:
+  - CKV_AWS_157 # Multi-AZ: cost vs. resilience tradeoff, exposed via var.multi_az
+  - CKV_AWS_118 # Enhanced monitoring: cost tradeoff, exposed via var.enable_enhanced_monitoring
+  - CKV_AWS_353 # Performance Insights: cost tradeoff, exposed via var.enable_performance_insights
+  - CKV_AWS_129 # CloudWatch log exports: valid values are engine-specific, exposed via var.enabled_cloudwatch_logs_exports
+  # aws_db_instance.read_replica.auto_minor_version_upgrade defaults to true (see
+  # var.read_replicas' optional() default in variables.tf); checkov can't resolve the
+  # value through the for_each/each.value indirection and flags it conservatively.
+  - CKV_AWS_226
+  # False positive: aws_security_group.this IS attached - to aws_db_instance.this and
+  # aws_db_instance.read_replica, via local.vpc_security_group_ids. Checkov's graph
+  # check can't trace the security group's id through that local's concat()/conditional
+  # (it's merged with var.vpc_security_group_ids and gated on create_security_group), so
+  # it reports the security group as unattached even though it plainly is.
+  - CKV2_AWS_5
