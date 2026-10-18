@@ -1,4 +1,10 @@
-# terraform-aws-sudo-rds
+# terraform-aws-rds
+
+| [![Terraform CI](https://github.com/sudo-terraform-aws-modules/terraform-aws-rds/actions/workflows/main.yml/badge.svg)](https://github.com/sudo-terraform-aws-modules/terraform-aws-rds/actions/workflows/main.yml) | [![Terraform](https://img.shields.io/badge/terraform-%3E%3D1.3.0-7B42BC?logo=terraform)](versions.tf) | [![AWS provider](https://img.shields.io/badge/aws%20provider-%3E%3D6.0.0-FF9900)](versions.tf) | [![License](https://img.shields.io/github/license/sudo-terraform-aws-modules/terraform-aws-rds)](LICENSE) |
+|---|---|---|---|
+
+<img width="600" alt="SUDO x AWS" src="https://github.com/user-attachments/assets/f7044ff9-afce-4811-91c6-2f3c95635abb" />
+
 A reusable Terraform module for provisioning a standard AWS RDS instance (`aws_db_instance`) — Postgres, MySQL, MariaDB, Oracle, or SQL Server — with sane, security-conscious defaults.
 
 This module intentionally covers **standard RDS only**. Aurora clusters (`aws_rds_cluster`) have a different resource model and are out of scope here; use a separate `terraform-aws-sudo-rds-aurora` module for that.
@@ -49,7 +55,7 @@ See `examples/minimal` for the smallest working setup and `examples/complete` fo
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.66.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | >= 6.0.0 |
 
 ## Modules
 
