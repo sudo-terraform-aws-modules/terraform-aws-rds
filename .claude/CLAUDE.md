@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Project-scoped context for Claude Code and AGENTS.md-aware runtimes (Codex, Kiro, GitLab Duo, etc.). The root `CLAUDE.md` and `AGENTS.md` symlinks both point here so tools auto-discover this file.
+Project-scoped context for Claude Code and AGENTS.md-aware runtimes (Codex, Kiro, GitLab Duo, etc.). Claude Code reads this file from `.claude/` directly; the root `AGENTS.md` symlink points here for the other runtimes.
 
 ## What this repository is
 
