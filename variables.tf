@@ -14,6 +14,7 @@ variable "tags" {
   description = "A map of tags to apply to all resources created by this module."
   type        = map(string)
   default     = {}
+  nullable    = false
 }
 
 ### Engine / instance / storage ###
@@ -179,6 +180,7 @@ variable "vpc_security_group_ids" {
   description = "Existing security group IDs to attach to the DB instance, in addition to any security group this module creates."
   type        = list(string)
   default     = []
+  nullable    = false
 }
 
 variable "port" {
@@ -253,10 +255,15 @@ variable "skip_final_snapshot" {
   default     = false
 }
 
-variable "final_snapshot_identifier_prefix" {
-  description = "Prefix appended to var.identifier to build the final snapshot identifier. Ignored when skip_final_snapshot is true."
+variable "final_snapshot_identifier" {
+  description = "Explicit identifier for the final snapshot taken when the DB instance is destroyed. Null generates <identifier>-final-<random suffix>, which rotates whenever the instance is replaced so repeated destroys/replacements never collide with an existing snapshot. Ignored when skip_final_snapshot is true."
   type        = string
-  default     = "final"
+  default     = null
+
+  validation {
+    condition     = var.final_snapshot_identifier == null || (can(regex("^[a-zA-Z][a-zA-Z0-9-]{0,254}$", var.final_snapshot_identifier)) && !can(regex("--|-$", var.final_snapshot_identifier)))
+    error_message = "final_snapshot_identifier must start with a letter, be 1-255 characters of alphanumerics/hyphens, not end with a hyphen, and not contain consecutive hyphens."
+  }
 }
 
 variable "copy_tags_to_snapshot" {
@@ -334,7 +341,8 @@ variable "parameters" {
     value        = string
     apply_method = optional(string, "immediate")
   }))
-  default = []
+  default  = []
+  nullable = false
 }
 
 variable "create_db_option_group" {
@@ -368,7 +376,8 @@ variable "options" {
     db_security_group_memberships  = optional(list(string))
     vpc_security_group_memberships = optional(list(string))
   }))
-  default = []
+  default  = []
+  nullable = false
 }
 
 ### Monitoring ###
@@ -415,13 +424,17 @@ variable "performance_insights_kms_key_id" {
 }
 
 variable "performance_insights_retention_period" {
-  description = "Retention period in days for Performance Insights data: 7, 731, or a multiple of 31 up to 731. Ignored when enable_performance_insights is false."
+  description = "Retention period in days for Performance Insights data: 7, 731, or a multiple of 31 between 31 and 713. Ignored when enable_performance_insights is false."
   type        = number
   default     = 7
 
   validation {
-    condition     = var.performance_insights_retention_period == 7 || var.performance_insights_retention_period == 731 || var.performance_insights_retention_period % 31 == 0
-    error_message = "performance_insights_retention_period must be 7, 731, or a multiple of 31 up to 731."
+    condition = (
+      var.performance_insights_retention_period >= 7 &&
+      var.performance_insights_retention_period <= 731 &&
+      (var.performance_insights_retention_period == 7 || var.performance_insights_retention_period == 731 || var.performance_insights_retention_period % 31 == 0)
+    )
+    error_message = "performance_insights_retention_period must be 7, 731, or a multiple of 31 between 31 and 713."
   }
 }
 
@@ -429,6 +442,7 @@ variable "enabled_cloudwatch_logs_exports" {
   description = "List of engine log types to export to CloudWatch Logs. Valid values depend on the engine (e.g. postgresql/upgrade for Postgres; audit/error/general/slowquery for MySQL/MariaDB)."
   type        = list(string)
   default     = []
+  nullable    = false
 }
 
 variable "create_cloudwatch_log_group" {
@@ -463,7 +477,7 @@ variable "iam_database_authentication_enabled" {
 ### Read replicas ###
 
 variable "read_replicas" {
-  description = "Map of read replicas to create, keyed by a caller-chosen suffix appended to var.identifier. Fields left null fall back to the primary instance's corresponding setting where applicable (e.g. skip_final_snapshot defaults to var.skip_final_snapshot when unset)."
+  description = "Map of read replicas to create, keyed by a caller-chosen suffix appended to var.identifier. Fields left null fall back to the primary instance's corresponding setting where applicable (e.g. skip_final_snapshot defaults to var.skip_final_snapshot when unset). final_snapshot_identifier, when null, is generated as <identifier>-<key>-final-<random suffix>."
   type = map(object({
     instance_class               = optional(string)
     availability_zone            = optional(string)
@@ -475,7 +489,9 @@ variable "read_replicas" {
     monitoring_interval          = optional(number)
     performance_insights_enabled = optional(bool, false)
     skip_final_snapshot          = optional(bool)
+    final_snapshot_identifier    = optional(string)
     tags                         = optional(map(string), {})
   }))
-  default = {}
+  default  = {}
+  nullable = false
 }
