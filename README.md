@@ -50,12 +50,14 @@ See `examples/minimal` for the smallest working setup and `examples/complete` fo
 | ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.0.0 |
+| <a name="requirement_random"></a> [random](#requirement\_random) | >= 3.0.0 |
 
 ## Providers
 
 | Name | Version |
 | ---- | ------- |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | >= 6.0.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | >= 3.0.0 |
 
 ## Modules
 
@@ -76,6 +78,8 @@ No modules.
 | [aws_vpc_security_group_egress_rule.all](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_egress_rule) | resource |
 | [aws_vpc_security_group_ingress_rule.cidr](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
 | [aws_vpc_security_group_ingress_rule.security_groups](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
+| [random_id.final_snapshot](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/id) | resource |
+| [random_id.read_replica_final_snapshot](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/id) | resource |
 | [aws_iam_policy_document.monitoring_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 
@@ -106,7 +110,7 @@ No modules.
 | <a name="input_enabled_cloudwatch_logs_exports"></a> [enabled\_cloudwatch\_logs\_exports](#input\_enabled\_cloudwatch\_logs\_exports) | List of engine log types to export to CloudWatch Logs. Valid values depend on the engine (e.g. postgresql/upgrade for Postgres; audit/error/general/slowquery for MySQL/MariaDB). | `list(string)` | `[]` | no |
 | <a name="input_engine"></a> [engine](#input\_engine) | Database engine to use, e.g. postgres, mysql, mariadb, oracle-se2, sqlserver-ex. | `string` | n/a | yes |
 | <a name="input_engine_version"></a> [engine\_version](#input\_engine\_version) | Engine version to use. When null, AWS selects the current default version at creation time. | `string` | `null` | no |
-| <a name="input_final_snapshot_identifier_prefix"></a> [final\_snapshot\_identifier\_prefix](#input\_final\_snapshot\_identifier\_prefix) | Prefix appended to var.identifier to build the final snapshot identifier. Ignored when skip\_final\_snapshot is true. | `string` | `"final"` | no |
+| <a name="input_final_snapshot_identifier"></a> [final\_snapshot\_identifier](#input\_final\_snapshot\_identifier) | Explicit identifier for the final snapshot taken when the DB instance is destroyed. Null generates <identifier>-final-<random suffix>, which rotates whenever the instance is replaced so repeated destroys/replacements never collide with an existing snapshot. Ignored when skip\_final\_snapshot is true. | `string` | `null` | no |
 | <a name="input_iam_database_authentication_enabled"></a> [iam\_database\_authentication\_enabled](#input\_iam\_database\_authentication\_enabled) | Whether to enable IAM database authentication. Only supported by MySQL and PostgreSQL engines. | `bool` | `false` | no |
 | <a name="input_identifier"></a> [identifier](#input\_identifier) | RDS instance identifier. Must start with a letter, contain only alphanumeric characters and hyphens, not end with a hyphen, and not contain two consecutive hyphens. | `string` | n/a | yes |
 | <a name="input_instance_class"></a> [instance\_class](#input\_instance\_class) | Instance class for the DB instance, e.g. db.t4g.micro. | `string` | n/a | yes |
@@ -129,10 +133,10 @@ No modules.
 | <a name="input_parameters"></a> [parameters](#input\_parameters) | Parameters to set in the module-managed DB parameter group. Only used when create\_db\_parameter\_group is true. | <pre>list(object({<br/>    name         = string<br/>    value        = string<br/>    apply_method = optional(string, "immediate")<br/>  }))</pre> | `[]` | no |
 | <a name="input_password"></a> [password](#input\_password) | Master password. Required only when manage\_master\_user\_password is false. Never store this in plain tfvars; source it from a secrets manager at runtime. | `string` | `null` | no |
 | <a name="input_performance_insights_kms_key_id"></a> [performance\_insights\_kms\_key\_id](#input\_performance\_insights\_kms\_key\_id) | KMS key ARN used to encrypt Performance Insights data. Null uses the AWS-managed default key. Ignored when enable\_performance\_insights is false. | `string` | `null` | no |
-| <a name="input_performance_insights_retention_period"></a> [performance\_insights\_retention\_period](#input\_performance\_insights\_retention\_period) | Retention period in days for Performance Insights data: 7, 731, or a multiple of 31 up to 731. Ignored when enable\_performance\_insights is false. | `number` | `7` | no |
+| <a name="input_performance_insights_retention_period"></a> [performance\_insights\_retention\_period](#input\_performance\_insights\_retention\_period) | Retention period in days for Performance Insights data: 7, 731, or a multiple of 31 between 31 and 713. Ignored when enable\_performance\_insights is false. | `number` | `7` | no |
 | <a name="input_port"></a> [port](#input\_port) | Port the DB instance listens on. Null lets AWS use the engine default. Required (directly or via a recognized engine default) when create\_security\_group is true, since the security group rules need a concrete port. | `number` | `null` | no |
 | <a name="input_publicly_accessible"></a> [publicly\_accessible](#input\_publicly\_accessible) | Whether the DB instance is publicly accessible. | `bool` | `false` | no |
-| <a name="input_read_replicas"></a> [read\_replicas](#input\_read\_replicas) | Map of read replicas to create, keyed by a caller-chosen suffix appended to var.identifier. Fields left null fall back to the primary instance's corresponding setting where applicable (e.g. skip\_final\_snapshot defaults to var.skip\_final\_snapshot when unset). | <pre>map(object({<br/>    instance_class               = optional(string)<br/>    availability_zone            = optional(string)<br/>    multi_az                     = optional(bool, false)<br/>    publicly_accessible          = optional(bool, false)<br/>    vpc_security_group_ids       = optional(list(string))<br/>    parameter_group_name         = optional(string)<br/>    auto_minor_version_upgrade   = optional(bool, true)<br/>    monitoring_interval          = optional(number)<br/>    performance_insights_enabled = optional(bool, false)<br/>    skip_final_snapshot          = optional(bool)<br/>    tags                         = optional(map(string), {})<br/>  }))</pre> | `{}` | no |
+| <a name="input_read_replicas"></a> [read\_replicas](#input\_read\_replicas) | Map of read replicas to create, keyed by a caller-chosen suffix appended to var.identifier. Fields left null fall back to the primary instance's corresponding setting where applicable (e.g. skip\_final\_snapshot defaults to var.skip\_final\_snapshot when unset). final\_snapshot\_identifier, when null, is generated as <identifier>-<key>-final-<random suffix>. | <pre>map(object({<br/>    instance_class               = optional(string)<br/>    availability_zone            = optional(string)<br/>    multi_az                     = optional(bool, false)<br/>    publicly_accessible          = optional(bool, false)<br/>    vpc_security_group_ids       = optional(list(string))<br/>    parameter_group_name         = optional(string)<br/>    auto_minor_version_upgrade   = optional(bool, true)<br/>    monitoring_interval          = optional(number)<br/>    performance_insights_enabled = optional(bool, false)<br/>    skip_final_snapshot          = optional(bool)<br/>    final_snapshot_identifier    = optional(string)<br/>    tags                         = optional(map(string), {})<br/>  }))</pre> | `{}` | no |
 | <a name="input_security_group_ingress_cidr_blocks"></a> [security\_group\_ingress\_cidr\_blocks](#input\_security\_group\_ingress\_cidr\_blocks) | CIDR blocks allowed to reach the DB port. Only used when create\_security\_group is true. Left empty by default so no inbound access is opened unless explicitly requested. | `list(string)` | `[]` | no |
 | <a name="input_security_group_ingress_security_group_ids"></a> [security\_group\_ingress\_security\_group\_ids](#input\_security\_group\_ingress\_security\_group\_ids) | Security group IDs allowed to reach the DB port. Only used when create\_security\_group is true. | `list(string)` | `[]` | no |
 | <a name="input_skip_final_snapshot"></a> [skip\_final\_snapshot](#input\_skip\_final\_snapshot) | Whether to skip creating a final snapshot when the DB instance is destroyed. | `bool` | `false` | no |
