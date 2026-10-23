@@ -145,15 +145,34 @@ variable "vpc_id" {
 }
 
 variable "security_group_ingress_cidr_blocks" {
-  description = "CIDR blocks allowed to reach the DB port. Only used when create_security_group is true. Left empty by default so no inbound access is opened unless explicitly requested."
+  description = "IPv4 CIDR blocks allowed to reach the DB port. Only used when create_security_group is true. Each rule is keyed by its CIDR, so values must be known at plan time. Left empty by default so no inbound access is opened unless explicitly requested."
   type        = list(string)
   default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for cidr in var.security_group_ingress_cidr_blocks : can(cidrhost(cidr, 0)) && !can(regex(":", cidr))])
+    error_message = "security_group_ingress_cidr_blocks must contain only valid IPv4 CIDR blocks, e.g. 10.0.0.0/16."
+  }
 }
 
-variable "security_group_ingress_security_group_ids" {
-  description = "Security group IDs allowed to reach the DB port. Only used when create_security_group is true."
+variable "security_group_ingress_security_groups" {
+  description = "Map of security group IDs allowed to reach the DB port, keyed by a static caller-chosen name (e.g. { app = module.app.security_group_id }). The keys must be known at plan time; the IDs may be computed. Only used when create_security_group is true."
+  type        = map(string)
+  default     = {}
+  nullable    = false
+}
+
+variable "security_group_egress_cidr_blocks" {
+  description = "IPv4 CIDR blocks the DB instance may open outbound connections to (all protocols). Only used when create_security_group is true. Empty by default: RDS does not need egress to serve client connections, only for engine features that call out (e.g. S3 or Lambda integrations)."
   type        = list(string)
   default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for cidr in var.security_group_egress_cidr_blocks : can(cidrhost(cidr, 0)) && !can(regex(":", cidr))])
+    error_message = "security_group_egress_cidr_blocks must contain only valid IPv4 CIDR blocks, e.g. 10.0.0.0/16."
+  }
 }
 
 variable "vpc_security_group_ids" {
@@ -410,6 +429,29 @@ variable "enabled_cloudwatch_logs_exports" {
   description = "List of engine log types to export to CloudWatch Logs. Valid values depend on the engine (e.g. postgresql/upgrade for Postgres; audit/error/general/slowquery for MySQL/MariaDB)."
   type        = list(string)
   default     = []
+}
+
+variable "create_cloudwatch_log_group" {
+  description = "Whether this module creates the CloudWatch log groups for enabled_cloudwatch_logs_exports, with a retention period and optional KMS key. When false, RDS creates them on first export with no retention and no KMS key. If the log groups already exist (e.g. RDS created them earlier), import them or set this to false."
+  type        = bool
+  default     = true
+}
+
+variable "cloudwatch_log_group_retention_in_days" {
+  description = "Number of days to retain exported RDS logs in the module-managed log groups. Only used when create_cloudwatch_log_group is true."
+  type        = number
+  default     = 365
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.cloudwatch_log_group_retention_in_days)
+    error_message = "cloudwatch_log_group_retention_in_days must be one of: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653."
+  }
+}
+
+variable "cloudwatch_log_group_kms_key_id" {
+  description = "ARN of the KMS key used to encrypt the module-managed log groups. The key policy must allow the logs.<region>.amazonaws.com service principal. Null uses CloudWatch Logs' default encryption. Only used when create_cloudwatch_log_group is true."
+  type        = string
+  default     = null
 }
 
 variable "iam_database_authentication_enabled" {
