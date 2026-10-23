@@ -438,9 +438,9 @@ variable "create_cloudwatch_log_group" {
 }
 
 variable "cloudwatch_log_group_retention_in_days" {
-  description = "Number of days to retain exported RDS logs in the module-managed log groups. Only used when create_cloudwatch_log_group is true."
+  description = "Number of days to retain exported RDS logs in the module-managed log groups. Defaults to 30 days; set it per environment (e.g. 7 for dev, longer for audit-heavy production). Only used when create_cloudwatch_log_group is true."
   type        = number
-  default     = 365
+  default     = 30
 
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.cloudwatch_log_group_retention_in_days)
