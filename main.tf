@@ -9,15 +9,38 @@ locals {
   # A read replica may enable enhanced monitoring independently of the primary
   # (via read_replicas[*].monitoring_interval), so the shared monitoring role must
   # be created/resolved whenever ANY instance - primary or replica - needs one.
+  # Each instance only receives the role when its own interval is > 0.
+  primary_monitoring_interval = var.enable_enhanced_monitoring ? var.monitoring_interval : 0
   read_replica_monitoring_intervals = {
-    for k, v in var.read_replicas : k => coalesce(v.monitoring_interval, var.enable_enhanced_monitoring ? var.monitoring_interval : 0)
+    for k, v in var.read_replicas : k => coalesce(v.monitoring_interval, local.primary_monitoring_interval)
   }
-  any_enhanced_monitoring_enabled = var.enable_enhanced_monitoring || anytrue([for interval in local.read_replica_monitoring_intervals : interval > 0])
+  any_enhanced_monitoring_enabled = local.primary_monitoring_interval > 0 || anytrue([for interval in local.read_replica_monitoring_intervals : interval > 0])
   create_monitoring_role          = local.any_enhanced_monitoring_enabled && var.monitoring_role_arn == null && var.create_monitoring_role
 
   read_replica_skip_final_snapshot = {
     for k, v in var.read_replicas : k => coalesce(v.skip_final_snapshot, var.skip_final_snapshot)
   }
+
+  # Final snapshot identifiers get a random suffix so that destroying or replacing an
+  # instance whose identifier was used before does not fail on an existing snapshot.
+  # Callers can bypass the generated name with an explicit final_snapshot_identifier.
+  generate_final_snapshot_identifier = !var.skip_final_snapshot && var.final_snapshot_identifier == null
+  final_snapshot_identifier = var.skip_final_snapshot ? null : coalesce(
+    var.final_snapshot_identifier,
+    try("${var.identifier}-final-${random_id.final_snapshot[0].hex}", null),
+  )
+  read_replica_generated_final_snapshot = {
+    for k, v in var.read_replicas : k => v
+    if !local.read_replica_skip_final_snapshot[k] && v.final_snapshot_identifier == null
+  }
+  read_replica_final_snapshot_identifiers = {
+    for k, v in var.read_replicas : k => local.read_replica_skip_final_snapshot[k] ? null : coalesce(
+      v.final_snapshot_identifier,
+      try("${var.identifier}-${k}-final-${random_id.read_replica_final_snapshot[k].hex}", null),
+    )
+  }
+
+  primary_availability_zone = var.multi_az ? null : var.availability_zone
 
   # IAM role names are capped at 64 characters, and name_prefix reserves ~26 of those
   # for Terraform's generated suffix, leaving a ~38 character budget. Truncate long
@@ -233,6 +256,41 @@ resource "aws_iam_role_policy_attachment" "enhanced_monitoring" {
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }
 
+# Keepers cover the arguments that force aws_db_instance replacement, so a replaced
+# instance gets a fresh suffix and the next destroy/replace cannot collide with the
+# snapshot taken from the previous incarnation. A forced replacement (taint or
+# -replace) does not rotate the suffix; set final_snapshot_identifier for that case.
+resource "random_id" "final_snapshot" {
+  count = local.generate_final_snapshot_identifier ? 1 : 0
+
+  byte_length = 4
+
+  keepers = {
+    identifier         = var.identifier
+    engine             = var.engine
+    username           = var.username
+    db_name            = coalesce(var.db_name, "-")
+    availability_zone  = coalesce(local.primary_availability_zone, "-")
+    storage_encrypted  = tostring(var.storage_encrypted)
+    kms_key_id         = coalesce(var.kms_key_id, "-")
+    character_set_name = coalesce(var.character_set_name, "-")
+    timezone           = coalesce(var.timezone, "-")
+  }
+}
+
+resource "random_id" "read_replica_final_snapshot" {
+  for_each = local.read_replica_generated_final_snapshot
+
+  byte_length = 4
+
+  keepers = {
+    identifier        = "${var.identifier}-${each.key}"
+    availability_zone = coalesce(each.value.multi_az ? null : each.value.availability_zone, "-")
+    storage_encrypted = tostring(var.storage_encrypted)
+    kms_key_id        = coalesce(var.kms_key_id, "-")
+  }
+}
+
 resource "aws_db_instance" "this" {
   identifier     = var.identifier
   engine         = var.engine
@@ -266,7 +324,7 @@ resource "aws_db_instance" "this" {
   license_model        = var.license_model
 
   multi_az          = var.multi_az
-  availability_zone = var.multi_az ? null : var.availability_zone
+  availability_zone = local.primary_availability_zone
 
   backup_retention_period = var.backup_retention_period
   backup_window           = var.backup_window
@@ -280,10 +338,10 @@ resource "aws_db_instance" "this" {
 
   deletion_protection       = var.deletion_protection
   skip_final_snapshot       = var.skip_final_snapshot
-  final_snapshot_identifier = var.skip_final_snapshot ? null : "${var.identifier}-${var.final_snapshot_identifier_prefix}"
+  final_snapshot_identifier = local.final_snapshot_identifier
 
-  monitoring_interval = var.enable_enhanced_monitoring ? var.monitoring_interval : 0
-  monitoring_role_arn = local.monitoring_role_arn
+  monitoring_interval = local.primary_monitoring_interval
+  monitoring_role_arn = local.primary_monitoring_interval > 0 ? local.monitoring_role_arn : null
 
   performance_insights_enabled          = var.enable_performance_insights
   performance_insights_kms_key_id       = var.enable_performance_insights ? var.performance_insights_kms_key_id : null
@@ -306,7 +364,7 @@ resource "aws_db_instance" "this" {
     }
 
     precondition {
-      condition     = !var.enable_enhanced_monitoring || local.monitoring_role_arn != null
+      condition     = local.primary_monitoring_interval == 0 || local.monitoring_role_arn != null
       error_message = "When enable_enhanced_monitoring is true and create_monitoring_role is false, var.monitoring_role_arn must be set to an existing IAM role ARN."
     }
 
@@ -336,12 +394,12 @@ resource "aws_db_instance" "read_replica" {
   auto_minor_version_upgrade = each.value.auto_minor_version_upgrade
   deletion_protection        = var.deletion_protection
   skip_final_snapshot        = local.read_replica_skip_final_snapshot[each.key]
-  final_snapshot_identifier  = local.read_replica_skip_final_snapshot[each.key] ? null : "${var.identifier}-${each.key}-${var.final_snapshot_identifier_prefix}"
+  final_snapshot_identifier  = local.read_replica_final_snapshot_identifiers[each.key]
   copy_tags_to_snapshot      = var.copy_tags_to_snapshot
   apply_immediately          = var.apply_immediately
 
   monitoring_interval = local.read_replica_monitoring_intervals[each.key]
-  monitoring_role_arn = local.monitoring_role_arn
+  monitoring_role_arn = local.read_replica_monitoring_intervals[each.key] > 0 ? local.monitoring_role_arn : null
 
   performance_insights_enabled    = each.value.performance_insights_enabled
   performance_insights_kms_key_id = each.value.performance_insights_enabled ? var.performance_insights_kms_key_id : null
