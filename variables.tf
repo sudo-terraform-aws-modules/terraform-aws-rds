@@ -14,6 +14,7 @@ variable "tags" {
   description = "A map of tags to apply to all resources created by this module."
   type        = map(string)
   default     = {}
+  nullable    = false
 }
 
 ### Engine / instance / storage ###
@@ -145,21 +146,41 @@ variable "vpc_id" {
 }
 
 variable "security_group_ingress_cidr_blocks" {
-  description = "CIDR blocks allowed to reach the DB port. Only used when create_security_group is true. Left empty by default so no inbound access is opened unless explicitly requested."
+  description = "IPv4 CIDR blocks allowed to reach the DB port. Only used when create_security_group is true. Each rule is keyed by its CIDR, so values must be known at plan time. Left empty by default so no inbound access is opened unless explicitly requested."
   type        = list(string)
   default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for cidr in var.security_group_ingress_cidr_blocks : can(cidrhost(cidr, 0)) && !can(regex(":", cidr))])
+    error_message = "security_group_ingress_cidr_blocks must contain only valid IPv4 CIDR blocks, e.g. 10.0.0.0/16."
+  }
 }
 
-variable "security_group_ingress_security_group_ids" {
-  description = "Security group IDs allowed to reach the DB port. Only used when create_security_group is true."
+variable "security_group_ingress_security_groups" {
+  description = "Map of security group IDs allowed to reach the DB port, keyed by a static caller-chosen name (e.g. { app = module.app.security_group_id }). The keys must be known at plan time; the IDs may be computed. Only used when create_security_group is true."
+  type        = map(string)
+  default     = {}
+  nullable    = false
+}
+
+variable "security_group_egress_cidr_blocks" {
+  description = "IPv4 CIDR blocks the DB instance may open outbound connections to (all protocols). Only used when create_security_group is true. Empty by default: RDS does not need egress to serve client connections, only for engine features that call out (e.g. S3 or Lambda integrations)."
   type        = list(string)
   default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for cidr in var.security_group_egress_cidr_blocks : can(cidrhost(cidr, 0)) && !can(regex(":", cidr))])
+    error_message = "security_group_egress_cidr_blocks must contain only valid IPv4 CIDR blocks, e.g. 10.0.0.0/16."
+  }
 }
 
 variable "vpc_security_group_ids" {
   description = "Existing security group IDs to attach to the DB instance, in addition to any security group this module creates."
   type        = list(string)
   default     = []
+  nullable    = false
 }
 
 variable "port" {
@@ -234,10 +255,15 @@ variable "skip_final_snapshot" {
   default     = false
 }
 
-variable "final_snapshot_identifier_prefix" {
-  description = "Prefix appended to var.identifier to build the final snapshot identifier. Ignored when skip_final_snapshot is true."
+variable "final_snapshot_identifier" {
+  description = "Explicit identifier for the final snapshot taken when the DB instance is destroyed. Null generates <identifier>-final-<random suffix>, which rotates whenever the instance is replaced so repeated destroys/replacements never collide with an existing snapshot. Ignored when skip_final_snapshot is true."
   type        = string
-  default     = "final"
+  default     = null
+
+  validation {
+    condition     = var.final_snapshot_identifier == null || (can(regex("^[a-zA-Z][a-zA-Z0-9-]{0,254}$", var.final_snapshot_identifier)) && !can(regex("--|-$", var.final_snapshot_identifier)))
+    error_message = "final_snapshot_identifier must start with a letter, be 1-255 characters of alphanumerics/hyphens, not end with a hyphen, and not contain consecutive hyphens."
+  }
 }
 
 variable "copy_tags_to_snapshot" {
@@ -315,7 +341,8 @@ variable "parameters" {
     value        = string
     apply_method = optional(string, "immediate")
   }))
-  default = []
+  default  = []
+  nullable = false
 }
 
 variable "create_db_option_group" {
@@ -349,7 +376,8 @@ variable "options" {
     db_security_group_memberships  = optional(list(string))
     vpc_security_group_memberships = optional(list(string))
   }))
-  default = []
+  default  = []
+  nullable = false
 }
 
 ### Monitoring ###
@@ -396,13 +424,17 @@ variable "performance_insights_kms_key_id" {
 }
 
 variable "performance_insights_retention_period" {
-  description = "Retention period in days for Performance Insights data: 7, 731, or a multiple of 31 up to 731. Ignored when enable_performance_insights is false."
+  description = "Retention period in days for Performance Insights data: 7, 731, or a multiple of 31 between 31 and 713. Ignored when enable_performance_insights is false."
   type        = number
   default     = 7
 
   validation {
-    condition     = var.performance_insights_retention_period == 7 || var.performance_insights_retention_period == 731 || var.performance_insights_retention_period % 31 == 0
-    error_message = "performance_insights_retention_period must be 7, 731, or a multiple of 31 up to 731."
+    condition = (
+      var.performance_insights_retention_period >= 7 &&
+      var.performance_insights_retention_period <= 731 &&
+      (var.performance_insights_retention_period == 7 || var.performance_insights_retention_period == 731 || var.performance_insights_retention_period % 31 == 0)
+    )
+    error_message = "performance_insights_retention_period must be 7, 731, or a multiple of 31 between 31 and 713."
   }
 }
 
@@ -410,6 +442,30 @@ variable "enabled_cloudwatch_logs_exports" {
   description = "List of engine log types to export to CloudWatch Logs. Valid values depend on the engine (e.g. postgresql/upgrade for Postgres; audit/error/general/slowquery for MySQL/MariaDB)."
   type        = list(string)
   default     = []
+  nullable    = false
+}
+
+variable "create_cloudwatch_log_group" {
+  description = "Whether this module creates the CloudWatch log groups for enabled_cloudwatch_logs_exports, with a retention period and optional KMS key. When false, RDS creates them on first export with no retention and no KMS key. If the log groups already exist (e.g. RDS created them earlier), import them or set this to false."
+  type        = bool
+  default     = true
+}
+
+variable "cloudwatch_log_group_retention_in_days" {
+  description = "Number of days to retain exported RDS logs in the module-managed log groups. Defaults to 30 days; set it per environment (e.g. 7 for dev, longer for audit-heavy production). Only used when create_cloudwatch_log_group is true."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.cloudwatch_log_group_retention_in_days)
+    error_message = "cloudwatch_log_group_retention_in_days must be one of: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653."
+  }
+}
+
+variable "cloudwatch_log_group_kms_key_id" {
+  description = "ARN of the KMS key used to encrypt the module-managed log groups. The key policy must allow the logs.<region>.amazonaws.com service principal. Null uses CloudWatch Logs' default encryption. Only used when create_cloudwatch_log_group is true."
+  type        = string
+  default     = null
 }
 
 variable "iam_database_authentication_enabled" {
@@ -421,7 +477,7 @@ variable "iam_database_authentication_enabled" {
 ### Read replicas ###
 
 variable "read_replicas" {
-  description = "Map of read replicas to create, keyed by a caller-chosen suffix appended to var.identifier. Fields left null fall back to the primary instance's corresponding setting where applicable (e.g. skip_final_snapshot defaults to var.skip_final_snapshot when unset)."
+  description = "Map of read replicas to create, keyed by a caller-chosen suffix appended to var.identifier. Fields left null fall back to the primary instance's corresponding setting where applicable (e.g. skip_final_snapshot defaults to var.skip_final_snapshot when unset). final_snapshot_identifier, when null, is generated as <identifier>-<key>-final-<random suffix>."
   type = map(object({
     instance_class               = optional(string)
     availability_zone            = optional(string)
@@ -433,7 +489,9 @@ variable "read_replicas" {
     monitoring_interval          = optional(number)
     performance_insights_enabled = optional(bool, false)
     skip_final_snapshot          = optional(bool)
+    final_snapshot_identifier    = optional(string)
     tags                         = optional(map(string), {})
   }))
-  default = {}
+  default  = {}
+  nullable = false
 }

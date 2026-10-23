@@ -98,3 +98,8 @@ output "read_replica_endpoints" {
   description = "Map of read replica keys to their connection endpoints."
   value       = { for k, v in aws_db_instance.read_replica : k => v.endpoint }
 }
+
+output "cloudwatch_log_groups" {
+  description = "Map of exported log types to the name and ARN of the module-managed CloudWatch log group. Empty when create_cloudwatch_log_group is false or no logs are exported."
+  value       = { for k, v in aws_cloudwatch_log_group.this : k => { name = v.name, arn = v.arn } }
+}
