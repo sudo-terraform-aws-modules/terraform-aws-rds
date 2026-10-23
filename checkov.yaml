@@ -17,6 +17,7 @@ skip-check:
   - CKV_AWS_118 # Enhanced monitoring: cost tradeoff, exposed via var.enable_enhanced_monitoring
   - CKV_AWS_353 # Performance Insights: cost tradeoff, exposed via var.enable_performance_insights
   - CKV_AWS_129 # CloudWatch log exports: valid values are engine-specific, exposed via var.enabled_cloudwatch_logs_exports
+  - CKV_AWS_338 # Log retention >= 1 year: cost vs. compliance tradeoff, exposed via var.cloudwatch_log_group_retention_in_days (default 30)
   # aws_db_instance.read_replica.auto_minor_version_upgrade defaults to true (see
   # var.read_replicas' optional() default in variables.tf); checkov can't resolve the
   # value through the for_each/each.value indirection and flags it conservatively.
