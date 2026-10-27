@@ -5,23 +5,25 @@
 
 <img width="600" alt="SUDO x AWS" src="https://github.com/user-attachments/assets/f7044ff9-afce-4811-91c6-2f3c95635abb" />
 
-A reusable Terraform module for provisioning a standard AWS RDS instance (`aws_db_instance`) — Postgres, MySQL, MariaDB, Oracle, or SQL Server — with sane, security-conscious defaults.
+A reusable Terraform module for provisioning a standard AWS RDS instance (`aws_db_instance`) running Postgres, MySQL, MariaDB, Oracle, or SQL Server, with sane, security-conscious defaults.
 
-This module intentionally covers **standard RDS only**. Aurora clusters (`aws_rds_cluster`) have a different resource model and are out of scope here; use a separate `terraform-aws-sudo-rds-aurora` module for that.
+This module intentionally covers **standard RDS only**. Aurora clusters (`aws_rds_cluster`) have a different resource model and are out of scope here; use [terraform-aws-rds-aurora](https://github.com/sudo-terraform-aws-modules/terraform-aws-rds-aurora) for that.
 
 ## Features
 
 - AWS-managed master password by default (`manage_master_user_password`), with an opt-out to a caller-supplied password.
 - Storage encryption enabled by default; deletion protection enabled by default.
-- Optional module-managed DB subnet group, security group (standalone rule resources keyed by CIDR or static name, no egress unless requested), parameter group, and option group — or bring your own existing ones.
-- Optional Enhanced Monitoring (with a module-managed IAM role), Performance Insights, CloudWatch log exports (into module-managed log groups with retention and optional KMS), and IAM database authentication.
-- Optional same-region read replicas via a single `read_replicas` map. Note: AWS does not support creating read replicas from a source instance where `manage_master_user_password` is `true` — set it to `false` and supply `var.password` if you need read replicas (enforced by a plan-time precondition). Each replica can also set its own `skip_final_snapshot`, independent of the primary's `var.skip_final_snapshot` (falls back to it when left unset) — since a replica's data is redundant with the primary, it's common to skip its final snapshot even when the primary keeps one.
+- Final snapshots named `<identifier>-final-<random suffix>`, rotated whenever the instance is replaced, so repeated destroys never collide with an existing snapshot. Override with `final_snapshot_identifier`.
+- Optional module-managed DB subnet group, security group (standalone rule resources keyed by CIDR or static name, no egress unless requested), parameter group, and option group. Or bring your own existing ones.
+- Optional Enhanced Monitoring (with a module-managed IAM role), Performance Insights, CloudWatch log exports (into module-managed log groups with 30-day default retention and optional KMS), and IAM database authentication.
+- Optional same-region read replicas via a single `read_replicas` map. Each replica can set its own `skip_final_snapshot`, independent of the primary's `var.skip_final_snapshot` (falls back to it when left unset). Since a replica's data is redundant with the primary, it's common to skip its final snapshot even when the primary keeps one.
 
 ## Usage
 
 ```hcl
 module "rds" {
-  source = "github.com/sudo-terraform-aws-modules/terraform-aws-sudo-rds"
+  source  = "sudo-terraform-aws-modules/rds/aws"
+  version = "1.0.0"
 
   identifier     = "my-app-db"
   engine         = "postgres"
@@ -29,7 +31,7 @@ module "rds" {
   instance_class = "db.t4g.micro"
 
   allocated_storage = 20
-  username           = "app_admin"
+  username          = "app_admin"
 
   subnet_ids             = module.vpc.private_subnets
   vpc_security_group_ids = [module.security_group.security_group_id]
@@ -41,7 +43,8 @@ See `examples/minimal` for the smallest working setup and `examples/complete` fo
 ## Known AWS limitations
 
 - **Read replicas + AWS-managed master password**: AWS does not support creating a read replica from a source instance where `manage_master_user_password` is `true`. Set it to `false` and supply `var.password` if `var.read_replicas` is non-empty (enforced by a plan-time precondition).
-- **Custom option group + final snapshot**: AWS pins an option group to any snapshot (manual or final) taken while that option group was attached, and refuses to delete the option group while such a snapshot exists. If `create_db_option_group = true` and the primary keeps its final snapshot (`skip_final_snapshot = false`, the default), `terraform destroy` will delete the instance but then fail to delete `aws_db_option_group.this` — the option group stays until you manually delete the final snapshot. This is an AWS-side dependency Terraform cannot express or resolve for you, since the final snapshot is created outside of Terraform's state. Either accept that the option group outlives a `destroy` when you keep final snapshots, or set `skip_final_snapshot = true` in throwaway/CI environments where you don't need the snapshot.
+- **Existing CloudWatch log groups**: if RDS already created `/aws/rds/instance/<identifier>/<log type>` (e.g. exports were enabled before this module managed the log groups), creating them fails with `ResourceAlreadyExistsException`. Import them into `aws_cloudwatch_log_group.this["<log type>"]`, or set `create_cloudwatch_log_group = false`.
+- **Custom option group + final snapshot**: AWS pins an option group to any snapshot (manual or final) taken while that option group was attached, and refuses to delete the option group while such a snapshot exists. If `create_db_option_group = true` and the primary keeps its final snapshot (`skip_final_snapshot = false`, the default), `terraform destroy` will delete the instance but then fail to delete `aws_db_option_group.this`. The option group stays until you manually delete the final snapshot. This is an AWS-side dependency Terraform cannot express or resolve for you, since the final snapshot is created outside of Terraform's state. Either accept that the option group outlives a `destroy` when you keep final snapshots, or set `skip_final_snapshot = true` in throwaway/CI environments where you don't need the snapshot.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -56,7 +59,7 @@ See `examples/minimal` for the smallest working setup and `examples/complete` fo
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.70.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | >= 6.0.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | >= 3.0.0 |
 
 ## Modules

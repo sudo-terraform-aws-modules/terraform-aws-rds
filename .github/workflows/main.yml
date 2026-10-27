@@ -56,3 +56,17 @@ jobs:
           quiet: true
           soft_fail: false
           download_external_modules: true
+
+  test:
+    runs-on: ubuntu-latest
+    name: terraform test
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: hashicorp/setup-terraform@v4
+
+      - name: Run unit tests
+        # Mock providers need Terraform 1.7+; the module itself still supports 1.3+.
+        run: |
+          terraform init -backend=false -input=false
+          terraform test -filter=tests/unit.tftest.hcl

@@ -63,7 +63,7 @@ locals {
     sqlserver-ex   = 1433
     sqlserver-web  = 1433
   }
-  resolved_port = coalesce(var.port, lookup(local.engine_default_ports, var.engine, null))
+  resolved_port = var.port != null ? var.port : lookup(local.engine_default_ports, var.engine, null)
 
   db_subnet_group_name = local.create_db_subnet_group ? aws_db_subnet_group.this[0].name : var.db_subnet_group_name
   vpc_security_group_ids = concat(
