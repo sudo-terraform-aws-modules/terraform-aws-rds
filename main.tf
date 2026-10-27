@@ -122,8 +122,10 @@ resource "aws_security_group" "this" {
   }
 }
 
+# Rules are keyed by the CIDR itself / the caller's static map key rather than list
+# position, so adding, removing, or reordering one rule never churns the others.
 resource "aws_vpc_security_group_ingress_rule" "cidr" {
-  for_each = local.create_security_group ? { for idx, cidr in var.security_group_ingress_cidr_blocks : tostring(idx) => cidr } : {}
+  for_each = local.create_security_group ? toset(var.security_group_ingress_cidr_blocks) : toset([])
 
   security_group_id = aws_security_group.this[0].id
   cidr_ipv4         = each.value
@@ -136,25 +138,29 @@ resource "aws_vpc_security_group_ingress_rule" "cidr" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "security_groups" {
-  for_each = local.create_security_group ? { for idx, sg in var.security_group_ingress_security_group_ids : tostring(idx) => sg } : {}
+  for_each = local.create_security_group ? var.security_group_ingress_security_groups : {}
 
   security_group_id            = aws_security_group.this[0].id
   referenced_security_group_id = each.value
   from_port                    = local.resolved_port
   to_port                      = local.resolved_port
   ip_protocol                  = "tcp"
-  description                  = "Allow DB access from security group ${each.value}"
+  description                  = "Allow DB access from security group ${each.key}"
 
   tags = local.tags
 }
 
-resource "aws_vpc_security_group_egress_rule" "all" {
-  count = local.create_security_group ? 1 : 0
+# No egress by default: security groups are stateful, so replies to inbound client
+# connections are allowed without an egress rule. Egress is only needed for
+# features where the DB engine initiates outbound connections (e.g. S3/Lambda
+# integrations, Oracle UTL_HTTP), and must be opened explicitly.
+resource "aws_vpc_security_group_egress_rule" "cidr" {
+  for_each = local.create_security_group ? toset(var.security_group_egress_cidr_blocks) : toset([])
 
   security_group_id = aws_security_group.this[0].id
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = each.value
   ip_protocol       = "-1"
-  description       = "Allow all outbound traffic"
+  description       = "Allow outbound traffic to ${each.value}"
 
   tags = local.tags
 }
@@ -256,6 +262,18 @@ resource "aws_iam_role_policy_attachment" "enhanced_monitoring" {
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }
 
+# Pre-create the log groups RDS exports to, so they get a retention period and an
+# optional KMS key. Otherwise RDS creates them on first export with neither.
+resource "aws_cloudwatch_log_group" "this" {
+  for_each = var.create_cloudwatch_log_group ? toset(var.enabled_cloudwatch_logs_exports) : toset([])
+
+  name              = "/aws/rds/instance/${var.identifier}/${each.value}"
+  retention_in_days = var.cloudwatch_log_group_retention_in_days
+  kms_key_id        = var.cloudwatch_log_group_kms_key_id
+
+  tags = local.tags
+}
+
 # Keepers cover the arguments that force aws_db_instance replacement, so a replaced
 # instance gets a fresh suffix and the next destroy/replace cannot collide with the
 # snapshot taken from the previous incarnation. A forced replacement (taint or
@@ -351,6 +369,8 @@ resource "aws_db_instance" "this" {
   iam_database_authentication_enabled = var.iam_database_authentication_enabled
 
   tags = local.tags
+
+  depends_on = [aws_cloudwatch_log_group.this]
 
   lifecycle {
     precondition {

@@ -13,8 +13,8 @@ This module intentionally covers **standard RDS only**. Aurora clusters (`aws_rd
 
 - AWS-managed master password by default (`manage_master_user_password`), with an opt-out to a caller-supplied password.
 - Storage encryption enabled by default; deletion protection enabled by default.
-- Optional module-managed DB subnet group, security group (with explicit ingress/egress rules, no inline blocks), parameter group, and option group — or bring your own existing ones.
-- Optional Enhanced Monitoring (with a module-managed IAM role), Performance Insights, CloudWatch log exports, and IAM database authentication.
+- Optional module-managed DB subnet group, security group (standalone rule resources keyed by CIDR or static name, no egress unless requested), parameter group, and option group — or bring your own existing ones.
+- Optional Enhanced Monitoring (with a module-managed IAM role), Performance Insights, CloudWatch log exports (into module-managed log groups with retention and optional KMS), and IAM database authentication.
 - Optional same-region read replicas via a single `read_replicas` map. Note: AWS does not support creating read replicas from a source instance where `manage_master_user_password` is `true` — set it to `false` and supply `var.password` if you need read replicas (enforced by a plan-time precondition). Each replica can also set its own `skip_final_snapshot`, independent of the primary's `var.skip_final_snapshot` (falls back to it when left unset) — since a replica's data is redundant with the primary, it's common to skip its final snapshot even when the primary keeps one.
 
 ## Usage
@@ -56,7 +56,7 @@ See `examples/minimal` for the smallest working setup and `examples/complete` fo
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | >= 6.0.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.70.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | >= 3.0.0 |
 
 ## Modules
@@ -67,6 +67,7 @@ No modules.
 
 | Name | Type |
 | ---- | ---- |
+| [aws_cloudwatch_log_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_db_instance.read_replica](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_instance) | resource |
 | [aws_db_instance.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_instance) | resource |
 | [aws_db_option_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_option_group) | resource |
@@ -75,7 +76,7 @@ No modules.
 | [aws_iam_role.enhanced_monitoring](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy_attachment.enhanced_monitoring](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_security_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
-| [aws_vpc_security_group_egress_rule.all](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_egress_rule) | resource |
+| [aws_vpc_security_group_egress_rule.cidr](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_egress_rule) | resource |
 | [aws_vpc_security_group_ingress_rule.cidr](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
 | [aws_vpc_security_group_ingress_rule.security_groups](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
 | [random_id.final_snapshot](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/id) | resource |
@@ -96,7 +97,10 @@ No modules.
 | <a name="input_backup_window"></a> [backup\_window](#input\_backup\_window) | Daily time range for automated backups, e.g. 04:00-05:00. Null lets AWS choose a window. | `string` | `null` | no |
 | <a name="input_ca_cert_identifier"></a> [ca\_cert\_identifier](#input\_ca\_cert\_identifier) | Identifier of the CA certificate for the DB instance. Null uses the AWS default. | `string` | `null` | no |
 | <a name="input_character_set_name"></a> [character\_set\_name](#input\_character\_set\_name) | Character set name for engines that support it (e.g. Oracle, SQL Server). Null uses the engine default. | `string` | `null` | no |
+| <a name="input_cloudwatch_log_group_kms_key_id"></a> [cloudwatch\_log\_group\_kms\_key\_id](#input\_cloudwatch\_log\_group\_kms\_key\_id) | ARN of the KMS key used to encrypt the module-managed log groups. The key policy must allow the logs.<region>.amazonaws.com service principal. Null uses CloudWatch Logs' default encryption. Only used when create\_cloudwatch\_log\_group is true. | `string` | `null` | no |
+| <a name="input_cloudwatch_log_group_retention_in_days"></a> [cloudwatch\_log\_group\_retention\_in\_days](#input\_cloudwatch\_log\_group\_retention\_in\_days) | Number of days to retain exported RDS logs in the module-managed log groups. Defaults to 30 days; set it per environment (e.g. 7 for dev, longer for audit-heavy production). Only used when create\_cloudwatch\_log\_group is true. | `number` | `30` | no |
 | <a name="input_copy_tags_to_snapshot"></a> [copy\_tags\_to\_snapshot](#input\_copy\_tags\_to\_snapshot) | Whether to copy tags from the DB instance to snapshots. | `bool` | `true` | no |
+| <a name="input_create_cloudwatch_log_group"></a> [create\_cloudwatch\_log\_group](#input\_create\_cloudwatch\_log\_group) | Whether this module creates the CloudWatch log groups for enabled\_cloudwatch\_logs\_exports, with a retention period and optional KMS key. When false, RDS creates them on first export with no retention and no KMS key. If the log groups already exist (e.g. RDS created them earlier), import them or set this to false. | `bool` | `true` | no |
 | <a name="input_create_db_option_group"></a> [create\_db\_option\_group](#input\_create\_db\_option\_group) | Whether this module creates a DB option group. When false, option\_group\_name may reference an existing one. Not all engines support option groups (e.g. Postgres does not). | `bool` | `false` | no |
 | <a name="input_create_db_parameter_group"></a> [create\_db\_parameter\_group](#input\_create\_db\_parameter\_group) | Whether this module creates a DB parameter group. When false, parameter\_group\_name may reference an existing one. | `bool` | `false` | no |
 | <a name="input_create_db_subnet_group"></a> [create\_db\_subnet\_group](#input\_create\_db\_subnet\_group) | Whether this module creates a DB subnet group. When false, db\_subnet\_group\_name must reference an existing one. | `bool` | `true` | no |
@@ -137,8 +141,9 @@ No modules.
 | <a name="input_port"></a> [port](#input\_port) | Port the DB instance listens on. Null lets AWS use the engine default. Required (directly or via a recognized engine default) when create\_security\_group is true, since the security group rules need a concrete port. | `number` | `null` | no |
 | <a name="input_publicly_accessible"></a> [publicly\_accessible](#input\_publicly\_accessible) | Whether the DB instance is publicly accessible. | `bool` | `false` | no |
 | <a name="input_read_replicas"></a> [read\_replicas](#input\_read\_replicas) | Map of read replicas to create, keyed by a caller-chosen suffix appended to var.identifier. Fields left null fall back to the primary instance's corresponding setting where applicable (e.g. skip\_final\_snapshot defaults to var.skip\_final\_snapshot when unset). final\_snapshot\_identifier, when null, is generated as <identifier>-<key>-final-<random suffix>. | <pre>map(object({<br/>    instance_class               = optional(string)<br/>    availability_zone            = optional(string)<br/>    multi_az                     = optional(bool, false)<br/>    publicly_accessible          = optional(bool, false)<br/>    vpc_security_group_ids       = optional(list(string))<br/>    parameter_group_name         = optional(string)<br/>    auto_minor_version_upgrade   = optional(bool, true)<br/>    monitoring_interval          = optional(number)<br/>    performance_insights_enabled = optional(bool, false)<br/>    skip_final_snapshot          = optional(bool)<br/>    final_snapshot_identifier    = optional(string)<br/>    tags                         = optional(map(string), {})<br/>  }))</pre> | `{}` | no |
-| <a name="input_security_group_ingress_cidr_blocks"></a> [security\_group\_ingress\_cidr\_blocks](#input\_security\_group\_ingress\_cidr\_blocks) | CIDR blocks allowed to reach the DB port. Only used when create\_security\_group is true. Left empty by default so no inbound access is opened unless explicitly requested. | `list(string)` | `[]` | no |
-| <a name="input_security_group_ingress_security_group_ids"></a> [security\_group\_ingress\_security\_group\_ids](#input\_security\_group\_ingress\_security\_group\_ids) | Security group IDs allowed to reach the DB port. Only used when create\_security\_group is true. | `list(string)` | `[]` | no |
+| <a name="input_security_group_egress_cidr_blocks"></a> [security\_group\_egress\_cidr\_blocks](#input\_security\_group\_egress\_cidr\_blocks) | IPv4 CIDR blocks the DB instance may open outbound connections to (all protocols). Only used when create\_security\_group is true. Empty by default: RDS does not need egress to serve client connections, only for engine features that call out (e.g. S3 or Lambda integrations). | `list(string)` | `[]` | no |
+| <a name="input_security_group_ingress_cidr_blocks"></a> [security\_group\_ingress\_cidr\_blocks](#input\_security\_group\_ingress\_cidr\_blocks) | IPv4 CIDR blocks allowed to reach the DB port. Only used when create\_security\_group is true. Each rule is keyed by its CIDR, so values must be known at plan time. Left empty by default so no inbound access is opened unless explicitly requested. | `list(string)` | `[]` | no |
+| <a name="input_security_group_ingress_security_groups"></a> [security\_group\_ingress\_security\_groups](#input\_security\_group\_ingress\_security\_groups) | Map of security group IDs allowed to reach the DB port, keyed by a static caller-chosen name (e.g. { app = module.app.security\_group\_id }). The keys must be known at plan time; the IDs may be computed. Only used when create\_security\_group is true. | `map(string)` | `{}` | no |
 | <a name="input_skip_final_snapshot"></a> [skip\_final\_snapshot](#input\_skip\_final\_snapshot) | Whether to skip creating a final snapshot when the DB instance is destroyed. | `bool` | `false` | no |
 | <a name="input_storage_encrypted"></a> [storage\_encrypted](#input\_storage\_encrypted) | Whether the DB storage is encrypted at rest. | `bool` | `true` | no |
 | <a name="input_storage_throughput"></a> [storage\_throughput](#input\_storage\_throughput) | Provisioned storage throughput in MiBps. Only applicable to gp3 storage. | `number` | `null` | no |
@@ -156,6 +161,7 @@ No modules.
 | ---- | ----------- |
 | <a name="output_address"></a> [address](#output\_address) | Hostname of the DB instance. |
 | <a name="output_arn"></a> [arn](#output\_arn) | ARN of the DB instance. |
+| <a name="output_cloudwatch_log_groups"></a> [cloudwatch\_log\_groups](#output\_cloudwatch\_log\_groups) | Map of exported log types to the name and ARN of the module-managed CloudWatch log group. Empty when create\_cloudwatch\_log\_group is false or no logs are exported. |
 | <a name="output_db_subnet_group_id"></a> [db\_subnet\_group\_id](#output\_db\_subnet\_group\_id) | ID of the DB subnet group, or null when create\_db\_subnet\_group is false. |
 | <a name="output_db_subnet_group_name"></a> [db\_subnet\_group\_name](#output\_db\_subnet\_group\_name) | Name of the DB subnet group in use, whether module-managed or caller-supplied. |
 | <a name="output_endpoint"></a> [endpoint](#output\_endpoint) | Connection endpoint of the DB instance, in address:port format. |
