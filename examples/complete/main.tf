@@ -87,8 +87,7 @@ module "rds" {
 
   read_replicas = {
     replica1 = {
-      instance_class      = "db.t4g.medium"
-      skip_final_snapshot = true
+      instance_class = "db.t4g.medium"
     }
   }
 

@@ -186,9 +186,6 @@ run "read_replica_fallbacks" {
         skip_final_snapshot    = true
         tags                   = { Role = "reporting" }
       }
-      r3 = {
-        final_snapshot_identifier = "r3-keep"
-      }
     }
   }
 
@@ -213,19 +210,40 @@ run "read_replica_fallbacks" {
   }
 
   assert {
-    condition = (
-      aws_db_instance.read_replica["r1"].final_snapshot_identifier == "unit-test-r1-final-abcd1234" &&
-      aws_db_instance.read_replica["r2"].final_snapshot_identifier == null &&
-      aws_db_instance.read_replica["r3"].final_snapshot_identifier == "r3-keep" &&
-      keys(random_id.read_replica_final_snapshot) == ["r1"]
-    )
-    error_message = "Replica final snapshots must inherit skip_final_snapshot, and only get a random suffix when no name is given."
+    condition = alltrue([
+      for r in aws_db_instance.read_replica : r.skip_final_snapshot && r.final_snapshot_identifier == null
+    ])
+    error_message = "Replicas must always skip the final snapshot, even when the primary keeps one."
   }
 
   assert {
     condition     = aws_db_instance.read_replica["r2"].tags == tomap({ Team = "data", Role = "reporting" })
     error_message = "Replica tags must be merged over the module tags."
   }
+}
+
+run "read_replica_rejects_final_snapshot" {
+  command = plan
+
+  variables {
+    manage_master_user_password = false
+    password                    = "unit-test-password"
+    read_replicas               = { r1 = { skip_final_snapshot = false } }
+  }
+
+  expect_failures = [var.read_replicas]
+}
+
+run "read_replica_rejects_final_snapshot_identifier" {
+  command = plan
+
+  variables {
+    manage_master_user_password = false
+    password                    = "unit-test-password"
+    read_replicas               = { r1 = { final_snapshot_identifier = "r1-keep" } }
+  }
+
+  expect_failures = [var.read_replicas]
 }
 
 run "read_replica_monitoring_without_primary" {

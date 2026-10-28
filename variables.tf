@@ -477,7 +477,7 @@ variable "iam_database_authentication_enabled" {
 ### Read replicas ###
 
 variable "read_replicas" {
-  description = "Map of read replicas to create, keyed by a caller-chosen suffix appended to var.identifier. Fields left null fall back to the primary instance's corresponding setting where applicable (e.g. skip_final_snapshot defaults to var.skip_final_snapshot when unset). final_snapshot_identifier, when null, is generated as <identifier>-<key>-final-<random suffix>."
+  description = "Map of read replicas to create, keyed by a caller-chosen suffix appended to var.identifier. Fields left null fall back to the primary instance's corresponding setting where applicable. Replicas never take a final snapshot because AWS rejects one when deleting a read replica: skip_final_snapshot and final_snapshot_identifier are kept only for backward compatibility and must be left unset (or skip_final_snapshot = true)."
   type = map(object({
     instance_class               = optional(string)
     availability_zone            = optional(string)
@@ -494,4 +494,11 @@ variable "read_replicas" {
   }))
   default  = {}
   nullable = false
+
+  validation {
+    condition = alltrue([
+      for r in values(var.read_replicas) : coalesce(r.skip_final_snapshot, true) && r.final_snapshot_identifier == null
+    ])
+    error_message = "AWS does not allow a final snapshot when deleting a read replica, so read_replicas entries cannot set skip_final_snapshot = false or final_snapshot_identifier. Remove those fields; replicas always skip the final snapshot."
+  }
 }

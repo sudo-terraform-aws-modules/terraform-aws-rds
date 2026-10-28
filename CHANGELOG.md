@@ -2,6 +2,13 @@
 
 All notable changes to this module are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the module uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Destroying or replacing a read replica no longer fails with `InvalidParameterCombination: FinalDBSnapshotIdentifier can not be specified when deleting a replica instance`. Replicas now always skip the final snapshot instead of inheriting `skip_final_snapshot` from the primary, and the generated `random_id.read_replica_final_snapshot` suffixes are removed ([#16](https://github.com/sudo-terraform-aws-modules/terraform-aws-rds/issues/16)).
+- `read_replicas` now rejects `skip_final_snapshot = false` and `final_snapshot_identifier` at plan time, since AWS can never honour them. Both fields stay in the type for backward compatibility.
+
 ## [1.0.0] - 2026-10-27
 
 ### Added
