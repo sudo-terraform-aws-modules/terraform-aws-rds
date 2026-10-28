@@ -17,10 +17,6 @@ locals {
   any_enhanced_monitoring_enabled = local.primary_monitoring_interval > 0 || anytrue([for interval in local.read_replica_monitoring_intervals : interval > 0])
   create_monitoring_role          = local.any_enhanced_monitoring_enabled && var.monitoring_role_arn == null && var.create_monitoring_role
 
-  read_replica_skip_final_snapshot = {
-    for k, v in var.read_replicas : k => coalesce(v.skip_final_snapshot, var.skip_final_snapshot)
-  }
-
   # Final snapshot identifiers get a random suffix so that destroying or replacing an
   # instance whose identifier was used before does not fail on an existing snapshot.
   # Callers can bypass the generated name with an explicit final_snapshot_identifier.
@@ -29,16 +25,6 @@ locals {
     var.final_snapshot_identifier,
     try("${var.identifier}-final-${random_id.final_snapshot[0].hex}", null),
   )
-  read_replica_generated_final_snapshot = {
-    for k, v in var.read_replicas : k => v
-    if !local.read_replica_skip_final_snapshot[k] && v.final_snapshot_identifier == null
-  }
-  read_replica_final_snapshot_identifiers = {
-    for k, v in var.read_replicas : k => local.read_replica_skip_final_snapshot[k] ? null : coalesce(
-      v.final_snapshot_identifier,
-      try("${var.identifier}-${k}-final-${random_id.read_replica_final_snapshot[k].hex}", null),
-    )
-  }
 
   primary_availability_zone = var.multi_az ? null : var.availability_zone
 
@@ -296,19 +282,6 @@ resource "random_id" "final_snapshot" {
   }
 }
 
-resource "random_id" "read_replica_final_snapshot" {
-  for_each = local.read_replica_generated_final_snapshot
-
-  byte_length = 4
-
-  keepers = {
-    identifier        = "${var.identifier}-${each.key}"
-    availability_zone = coalesce(each.value.multi_az ? null : each.value.availability_zone, "-")
-    storage_encrypted = tostring(var.storage_encrypted)
-    kms_key_id        = coalesce(var.kms_key_id, "-")
-  }
-}
-
 resource "aws_db_instance" "this" {
   identifier     = var.identifier
   engine         = var.engine
@@ -413,10 +386,11 @@ resource "aws_db_instance" "read_replica" {
 
   auto_minor_version_upgrade = each.value.auto_minor_version_upgrade
   deletion_protection        = var.deletion_protection
-  skip_final_snapshot        = local.read_replica_skip_final_snapshot[each.key]
-  final_snapshot_identifier  = local.read_replica_final_snapshot_identifiers[each.key]
-  copy_tags_to_snapshot      = var.copy_tags_to_snapshot
-  apply_immediately          = var.apply_immediately
+  # AWS rejects a final snapshot when deleting a read replica
+  # (InvalidParameterCombination), so replicas always skip it.
+  skip_final_snapshot   = true
+  copy_tags_to_snapshot = var.copy_tags_to_snapshot
+  apply_immediately     = var.apply_immediately
 
   monitoring_interval = local.read_replica_monitoring_intervals[each.key]
   monitoring_role_arn = local.read_replica_monitoring_intervals[each.key] > 0 ? local.monitoring_role_arn : null
